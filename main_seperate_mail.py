@@ -307,8 +307,8 @@ def create_teams_meeting(candidateName, email, startDateTime, endDateTime,
         "onlineMeetingId": online_meeting_id,
         "meetingId": meeting_id,
         "passcode": passcode,
-        "startDateTime": response_data.get("startDateTime"),
-        "endDateTime": response_data.get("endDateTime"),
+        "startDateTime": startDateTime,
+        "endDateTime": endDateTime,
         "subject": response_data.get("subject"),
         "duration": str(end - start)
     }
