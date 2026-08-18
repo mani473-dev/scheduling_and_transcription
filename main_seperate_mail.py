@@ -142,13 +142,13 @@ def update_event_invitation_body(access_token, event_id, candidate_name,
         "<hr>"
         "<h3>Microsoft Teams Meeting</h3>"
         f"<p><a href=\"{join_web_url}\">"
-        "Click here to join the Microsoft Teams Interview"
-        "</a></p>"
-        f"{meeting_details}"
+                "Click here to join the Microsoft Teams Interview"
+                "</a></p>"
+        # f"{meeting_details}"
         "<p>Please join the meeting at the scheduled time and conduct the interview with the candidate.</p>"
         "<p>Regards,<br>HR Recruitment Team</p>"
-        # Preserve the Teams-generated meeting content/blob.
-        f"{existing_content}"
+        # # Preserve the Teams-generated meeting content/blob.
+        # f"{existing_content}"
         "</body></html>"
     )
 
