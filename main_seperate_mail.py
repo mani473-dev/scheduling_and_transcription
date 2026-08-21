@@ -1,3 +1,4 @@
+#main_updatedBodyV1.py
 from msal import ConfidentialClientApplication
 import requests
 import os
@@ -50,267 +51,456 @@ def get_access_token():
 # ==========================================
 # Create Teams Meeting
 # ==========================================
-def get_online_meeting_details(access_token, online_meeting_id, join_web_url=None):
-    """Get Teams join URL, meeting ID and passcode."""
+
+# ==========================================
+# Send Mail
+# ==========================================
+
+def send_mail(
+    access_token,
+    recipient_email,
+    subject,
+    body
+):
+
     url = (
         "https://graph.microsoft.com/v1.0/"
-        f"users/{OBJECT_ID}/onlineMeetings/{online_meeting_id}"
+        f"users/{OBJECT_ID}/sendMail"
     )
-    headers = {"Authorization": f"Bearer {access_token}"}
-    params = {"$select": "id,subject,joinWebUrl,joinMeetingIdSettings"}
-    response = requests.get(url, headers=headers, params=params)
-    try:
-        data = response.json()
-    except Exception:
-        data = {"message": response.text}
-    if response.status_code != 200:
-        return {"status": "Failed", "statusCode": response.status_code, "response": data}
-    settings = data.get("joinMeetingIdSettings", {})
-    return {
-        "status": "Success",
-        "onlineMeetingId": data.get("id"),
-        "joinWebUrl": data.get("joinWebUrl") or join_web_url,
-        "meetingId": settings.get("joinMeetingId"),
-        "passcode": settings.get("passcode")
-    }
 
-
-def update_event_invitation_body(access_token, event_id, candidate_name,
-                                 subject, start_date_time, end_date_time,
-                                 join_web_url, meeting_id, passcode,
-                                 interviewers):
-    """Add the custom HR invitation while preserving the Teams body blob."""
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
-    event_url = (
-        "https://graph.microsoft.com/v1.0/"
-        f"users/{OBJECT_ID}/events/{event_id}"
-    )
 
-    # Microsoft recommends fetching and preserving the existing body for
-    # an online meeting so the Teams meeting blob is not removed.
-    get_response = requests.get(
-        event_url,
+    payload = {
+
+        "message": {
+
+            "subject": subject,
+
+            "body": {
+                "contentType": "HTML",
+                "content": body
+            },
+
+            "toRecipients": [
+                {
+                    "emailAddress": {
+                        "address": recipient_email
+                    }
+                }
+            ]
+        },
+
+        "saveToSentItems": True
+    }
+
+    response = requests.post(
+        url,
         headers=headers,
-        params={"$select": "body"}
+        json=payload
     )
-    try:
-        existing_event = get_response.json()
-    except Exception:
-        existing_event = {"message": get_response.text}
-    if get_response.status_code != 200:
-        return {
-            "status": "Failed",
-            "statusCode": get_response.status_code,
-            "response": existing_event
-        }
-
-    existing_body = existing_event.get("body", {})
-    existing_content = existing_body.get("content", "")
-
-    interview_date = start_date_time[:10]
-    start_time = start_date_time[11:16]
-    end_time = end_date_time[11:16]
-
-    interviewer_text = ""
-    if interviewers:
-        interviewer_text = (
-            "<p><strong>Interviewer(s):</strong> "
-            + ", ".join(interviewers)
-            + "</p>"
-        )
-
-    meeting_details = ""
-    if meeting_id:
-        meeting_details += f"<p><strong>Meeting ID:</strong> {meeting_id}</p>"
-    if passcode:
-        meeting_details += f"<p><strong>Passcode:</strong> {passcode}</p>"
-
-    # One calendar event has one shared body for all attendees. Therefore the
-    # wording is intentionally neutral rather than addressing only one person.
-    custom_body = (
-        "<html><body>"
-        "<p>Hello,</p>"
-        "<p>You have been invited to attend/conduct an interview for the following candidate.</p>"
-        f"<p><strong>Candidate Name:</strong> {candidate_name}<br>"
-        f"<strong>Interview Subject:</strong> {subject}<br>"
-        f"<strong>Interview Date:</strong> {interview_date}<br>"
-        f"<strong>Interview Time:</strong> {start_time} - {end_time} IST</p>"
-        f"{interviewer_text}"
-        "<hr>"
-        "<h3>Microsoft Teams Meeting</h3>"
-        f"<p><a href=\"{join_web_url}\">"
-                "Click here to join the Microsoft Teams Interview"
-                "</a></p>"
-        # f"{meeting_details}"
-        "<p>Please join the meeting at the scheduled time and conduct the interview with the candidate.</p>"
-        "<p>Regards,<br>HR Recruitment Team</p>"
-        # # Preserve the Teams-generated meeting content/blob.
-        # f"{existing_content}"
-        "</body></html>"
-    )
-
-    patch_response = requests.patch(
-        event_url,
-        headers=headers,
-        json={"body": {"contentType": "HTML", "content": custom_body}}
-    )
-    try:
-        patch_data = patch_response.json()
-    except Exception:
-        patch_data = {"message": patch_response.text}
-
-    if patch_response.status_code not in (200, 201):
-        return {
-            "status": "Failed",
-            "statusCode": patch_response.status_code,
-            "response": patch_data
-        }
-    return {"status": "Success"}
+    print(f"sendmail- {response.status_code}")
+    print("-----------------------------------------------")
+    print(url)
+    # print(payload)
+    
+    return response.status_code
 
 
-def create_teams_meeting(candidateName, email, startDateTime, endDateTime,
-                         subject, interviewers, interviewersEmail):
+def create_teams_meeting(
+    candidateName,
+    email,
+    startDateTime,
+    endDateTime,
+    subject,
+    interviewers,
+    interviewersEmail
+):
+
+
+
+    # ==========================================
+    # Generate Access Token
+    # ==========================================
+
     access_token = get_access_token()
+
     if access_token is None:
-        return {"status": "Failed", "message": "Unable to generate access token."}
+
+        return {
+            "status": "Failed",
+            "message": "Unable to generate access token."
+        }
+
+    # ==========================================
+    # Format Interview Date & Time
+    # ==========================================
+
+    interview_date = startDateTime[:10]
+
+    interview_start_time = startDateTime[11:16]
+    interview_end_time = endDateTime[11:16]
+
+    interview_time = (
+        f"{interview_start_time} - "
+        f"{interview_end_time} IST"
+    )
+
+
+    # ==========================================
+    # Request Headers
+    # ==========================================
 
     headers = {
-        "Authorization": f"Bearer {access_token}",
+
+        "Authorization": (
+            f"Bearer {access_token}"
+        ),
+
         "Content-Type": "application/json"
     }
+
+
+    # ==========================================
+    # Microsoft Graph Calendar Event API
+    # ==========================================
+    # A calendar-backed Teams meeting is used so that
+    # the meeting can later be associated with a
+    # transcript through Microsoft Graph.
+
     teams_meeting_url = (
         "https://graph.microsoft.com/v1.0/"
         f"users/{OBJECT_ID}/events"
     )
 
-    attendees = [{
-        "emailAddress": {"address": email, "name": candidateName},
-        "type": "required"
-    }]
-    for interviewer_name, interviewer_email in zip(interviewers, interviewersEmail):
+
+
+    # ==========================================
+    # Build Interviewer Attendees
+    # ==========================================
+
+    attendees = []
+
+    for interviewer_name, interviewer_email in zip(
+        interviewers,
+        interviewersEmail
+    ):
+
         attendees.append({
-            "emailAddress": {"address": interviewer_email, "name": interviewer_name},
+
+            "emailAddress": {
+
+                "address": interviewer_email,
+
+                "name": interviewer_name
+            },
+
             "type": "required"
         })
 
-    # First create the calendar-backed Teams event. Teams details are generated
-    # by Graph only after this event is created.
-    teams_meeting_payload = {
-        "subject": f"{subject} - {candidateName}",
-        "body": {
-            "contentType": "HTML",
-            "content": (
-                f"<html><body><p>Interview for <strong>{candidateName}</strong>.</p>"
-                f"<p><strong>Interview Type:</strong> {subject}</p></body></html>"
-            )
-        },
-        "start": {"dateTime": startDateTime, "timeZone": "India Standard Time"},
-        "end": {"dateTime": endDateTime, "timeZone": "India Standard Time"},
-        "location": {"displayName": "Microsoft Teams"},
-        "attendees": attendees,
-        "isOnlineMeeting": True,
-        "onlineMeetingProvider": "teamsForBusiness",
-        "responseRequested": True,
-        "allowNewTimeProposals": True,
-        "isReminderOn": True,
-        "reminderMinutesBeforeStart": 30,
-        "showAs": "busy",
-        "importance": "normal",
-        "sensitivity": "normal"
-    }
+
+    # ==========================================
+    # Calendar-backed Teams Meeting Payload
+    # ==========================================
+    # Creating the meeting as a calendar event with
+    # isOnlineMeeting=True allows the meeting to be
+    # associated with the organizer's calendar and
+    # later used for transcript retrieval.
+    #
+    # startDateTime / endDateTime are expected in the
+    # format:
+    #   2026-08-10T14:30:00
+    #
+    # The timezone is explicitly specified below.
+    # ==========================================
+
+    teams_meeting_payload = calendar_events_url_payload = {
+
+    "subject": f"{subject}",
+
+    "body": {
+
+        "contentType": "HTML",
+
+        "content": (
+            "<html><body>"
+            "<p>Interview meeting created by HR Recruitment Team.</p>"
+            "</body></html>"
+        )
+    },
+
+    "location": {
+
+        "displayName": "Microsoft Teams"
+    },
+
+    "attendees": attendees,
+
+    "isOnlineMeeting": True,
+
+    "onlineMeetingProvider": "teamsForBusiness",
+
+    "responseRequested": True,
+
+    "allowNewTimeProposals": True,
+
+    "isReminderOn": True,
+
+    "reminderMinutesBeforeStart": 30,
+
+    "showAs": "busy",
+
+    "importance": "normal",
+
+    "sensitivity": "normal"
+}
+
+
+    # ==========================================
+    # Create Meeting
+    # ==========================================
 
     response = requests.post(
+
         teams_meeting_url,
+
         headers=headers,
+
         json=teams_meeting_payload
     )
+
+
+    # ==========================================
+    # Read Microsoft Graph Response
+    # ==========================================
+
     try:
+
         response_data = response.json()
+
     except Exception:
-        return {"status": "Failed", "message": response.text}
 
-    if response.status_code != 201:
-        return {"status": "Failed", "statusCode": response.status_code, "response": response_data}
-
-    event_id = response_data.get("id")
-    online_meeting = response_data.get("onlineMeeting", {})
-    join_web_url = online_meeting.get("joinUrl")
-    online_meeting_id = online_meeting.get("id")
-
-    # Some event responses expose only joinUrl. Resolve the meeting ID if needed.
-    if not online_meeting_id and join_web_url:
-        lookup_url = (
-            "https://graph.microsoft.com/v1.0/"
-            f"users/{OBJECT_ID}/onlineMeetings"
-        )
-        lookup_response = requests.get(
-            lookup_url,
-            headers=headers,
-            params={"$filter": f"JoinWebUrl eq '{join_web_url}'"}
-        )
-        try:
-            lookup_data = lookup_response.json()
-        except Exception:
-            lookup_data = {}
-        if lookup_response.status_code == 200 and lookup_data.get("value"):
-            online_meeting_id = lookup_data["value"][0].get("id")
-
-    meeting_id = None
-    passcode = None
-    if online_meeting_id:
-        details = get_online_meeting_details(
-            access_token, online_meeting_id, join_web_url
-        )
-        if details.get("status") == "Success":
-            join_web_url = details.get("joinWebUrl") or join_web_url
-            meeting_id = details.get("meetingId")
-            passcode = details.get("passcode")
-
-    # Add the custom HR email body after Graph has generated the Teams details.
-    body_update = update_event_invitation_body(
-        access_token=access_token,
-        event_id=event_id,
-        candidate_name=candidateName,
-        subject=subject,
-        start_date_time=startDateTime,
-        end_date_time=endDateTime,
-        join_web_url=join_web_url,
-        meeting_id=meeting_id,
-        passcode=passcode,
-        interviewers=interviewers
-    )
-
-    if body_update.get("status") != "Success":
         return {
+
             "status": "Failed",
-            "message": "Meeting was created, but the custom invitation body could not be updated.",
-            "eventId": event_id,
-            "onlineMeetingId": online_meeting_id,
-            "joinWebUrl": join_web_url,
-            "bodyUpdate": body_update
+
+            "message": response.text
         }
 
-    start = datetime.fromisoformat(startDateTime.replace("Z", "+00:00"))
-    end = datetime.fromisoformat(endDateTime.replace("Z", "+00:00"))
+
+    # ==========================================
+    # Meeting Created Successfully
+    # ==========================================
+
+    if response.status_code == 201:
+
+        # --------------------------------------
+        # Calculate Duration
+        # --------------------------------------
+
+        start = datetime.fromisoformat(
+            startDateTime.replace(
+                "Z",
+                "+00:00"
+            )
+        )
+
+        end = datetime.fromisoformat(
+            endDateTime.replace(
+                "Z",
+                "+00:00"
+            )
+        )
+
+        duration = end - start
+
+
+        # --------------------------------------
+        # Get Calendar Event ID
+        # --------------------------------------
+
+        event_id = response_data.get(
+            "id"
+        )
+
+
+        # --------------------------------------
+        # Get Teams Meeting URL
+        # --------------------------------------
+
+        online_meeting = (
+            response_data.get(
+                "onlineMeeting",
+                {}
+            )
+        )
+
+        join_web_url = online_meeting.get(
+            "joinUrl"
+        )
+
+        # ==========================================
+    # Candidate Mail
+    # ==========================================
+
+    candidate_body = f"""
+    <html>
+    <body>
+
+    <p>Dear {candidateName},</p>
+
+    <p>
+    We are pleased to inform you that your interview
+    has been scheduled.
+    </p>
+
+    <p>
+    <strong>Interview Subject:</strong> {subject}<br>
+    <strong>Interview Date:</strong> {interview_date}<br>
+    <strong>Interview Time:</strong> {interview_time}
+    </p>
+
+    <p>
+    <a href="{join_web_url}">
+    Join Microsoft Teams Meeting
+    </a>
+    </p>
+
+    <p>
+    Please join the meeting at the scheduled time.
+    </p>
+
+    <p>
+    Regards,<br>
+    HR Recruitment Team
+    </p>
+
+    </body>
+    </html>
+    """
+
+    send_mail(
+        access_token,
+        email,
+        f"{subject} - {candidateName}",
+        candidate_body
+    )
+
+    # ==========================================
+    # Interviewer Mails
+    # ==========================================
+
+    for interviewer_name, interviewer_email in zip(
+        interviewers,
+        interviewersEmail
+    ):
+
+        interviewer_body = f"""
+        <html>
+        <body>
+
+        <p>Dear {interviewer_name},</p>
+
+        <p>
+        You have been assigned to conduct an interview
+        for the following candidate.
+        </p>
+
+        <p>
+        <strong>Candidate Name:</strong> {candidateName}<br>
+        <strong>Interview Subject:</strong> {subject}<br>
+        <strong>Interview Date:</strong> {interview_date}<br>
+        <strong>Interview Time:</strong> {interview_time}
+        </p>
+
+        <p>
+        <a href="{join_web_url}">
+        Join Microsoft Teams Meeting
+        </a>
+        </p>
+
+        <p>
+        Please join the meeting at the scheduled time
+        and conduct the interview with the candidate.
+        </p>
+
+        <p>
+        Regards,<br>
+        HR Recruitment Team
+        </p>
+
+        </body>
+        </html>
+        """
+
+        send_mail(
+            access_token,
+            interviewer_email,
+            f"Interview Assignment - {candidateName}",
+            interviewer_body
+        )
+
+
+        # --------------------------------------
+        # Return the calendar event ID.
+        #
+        # The event ID is important for tracking the
+        # scheduled interview in your application.
+        #
+        # The onlineMeeting object contains the Teams
+        # join URL.
+        # --------------------------------------
+
+
+        # --------------------------------------
+        # Return Response
+        # --------------------------------------
+
+        return {
+
+            "status": "Success",
+
+            "candidateName": candidateName,
+
+            "candidateEmail": email,
+
+            "interviewers": interviewers,
+
+            "interviewersEmail": interviewersEmail,
+
+            "eventId": event_id,
+
+            "joinWebUrl": join_web_url,
+
+            "onlineMeetingId": online_meeting.get(
+                "id"
+            ),
+
+            "startDateTime": startDateTime,
+
+            "endDateTime": endDateTime,
+
+            "subject": response_data.get(
+                "subject"
+            ),
+
+            "duration": str(duration)
+        }
+
+
+    # ==========================================
+    # Microsoft Graph Error
+    # ==========================================
 
     return {
-        "status": "Success",
-        "candidateName": candidateName,
-        "candidateEmail": email,
-        "interviewers": interviewers,
-        "interviewersEmail": interviewersEmail,
-        "eventId": event_id,
-        "joinWebUrl": join_web_url,
-        "onlineMeetingId": online_meeting_id,
-        "meetingId": meeting_id,
-        "passcode": passcode,
-        "startDateTime": startDateTime,
-        "endDateTime": endDateTime,
-        "subject": response_data.get("subject"),
-        "duration": str(end - start)
+
+        "status": "Failed",
+
+        "statusCode": response.status_code,
+
+        "response": response_data
     }
 
 
@@ -554,8 +744,7 @@ def get_latest_transcript(
         return {
             "status": "Failed",
             "message": (
-                "No onlineMeetingId was returned for "
-                "the calendar event."
+                "No Meeting started for the calendar event."
             ),
             "eventId": event_id
         }
@@ -617,4 +806,3 @@ def get_latest_transcript(
         "createdDateTime": latest.get("createdDateTime"),
         "transcript": content_result.get("content")
     }
-
