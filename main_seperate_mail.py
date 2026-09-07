@@ -1,4 +1,4 @@
-#main_updatedBodyV1.py
+
 from msal import ConfidentialClientApplication
 import requests
 import os
@@ -6,12 +6,13 @@ import os
 from dotenv import load_dotenv
 from datetime import datetime
 
+
 load_dotenv()
 
 
-# ==========================================
+# ============================================================
 # Azure Configuration
-# ==========================================
+# ============================================================
 
 TENANT_ID = os.getenv("TENANT_ID")
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -19,9 +20,9 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 OBJECT_ID = os.getenv("OBJECT_ID")
 
 
-# ==========================================
+# ============================================================
 # Generate Microsoft Graph Access Token
-# ==========================================
+# ============================================================
 
 def get_access_token():
 
@@ -43,18 +44,17 @@ def get_access_token():
 
     if "access_token" not in token_result:
 
+        print("Unable to generate access token.")
+        print(token_result)
+
         return None
 
     return token_result["access_token"]
 
 
-# ==========================================
-# Create Teams Meeting
-# ==========================================
-
-# ==========================================
-# Send Mail
-# ==========================================
+# ============================================================
+# Send Email
+# ============================================================
 
 def send_mail(
     access_token,
@@ -101,13 +101,22 @@ def send_mail(
         headers=headers,
         json=payload
     )
-    print(f"sendmail- {response.status_code}")
+
+    print(f"sendmail - {response.status_code}")
     print("-----------------------------------------------")
     print(url)
-    # print(payload)
-    
+
+    if response.status_code not in [200, 202]:
+
+        print("Email sending failed.")
+        print(response.text)
+
     return response.status_code
 
+
+# ============================================================
+# Create Teams Meeting
+# ============================================================
 
 def create_teams_meeting(
     candidateName,
@@ -119,11 +128,9 @@ def create_teams_meeting(
     interviewersEmail
 ):
 
-
-
-    # ==========================================
+    # ========================================================
     # Generate Access Token
-    # ==========================================
+    # ========================================================
 
     access_token = get_access_token()
 
@@ -134,14 +141,47 @@ def create_teams_meeting(
             "message": "Unable to generate access token."
         }
 
-    # ==========================================
-    # Format Interview Date & Time
-    # ==========================================
 
-    interview_date = startDateTime[:10]
+    # ========================================================
+    # Normalize DateTime
+    # ========================================================
 
-    interview_start_time = startDateTime[11:16]
-    interview_end_time = endDateTime[11:16]
+    # Expected input:
+    #
+    # 2026-09-08T14:30:00
+    #
+    # or:
+    #
+    # 2026-09-08T14:30:00Z
+    #
+    # We are treating the supplied time as IST.
+    #
+    # Therefore we remove Z before sending it to Graph
+    # and explicitly specify:
+    #
+    # India Standard Time
+    # ========================================================
+
+    graph_start_datetime = startDateTime.replace(
+        "Z",
+        ""
+    )
+
+    graph_end_datetime = endDateTime.replace(
+        "Z",
+        ""
+    )
+
+
+    # ========================================================
+    # Format Interview Date & Time for Email
+    # ========================================================
+
+    interview_date = graph_start_datetime[:10]
+
+    interview_start_time = graph_start_datetime[11:16]
+
+    interview_end_time = graph_end_datetime[11:16]
 
     interview_time = (
         f"{interview_start_time} - "
@@ -149,9 +189,9 @@ def create_teams_meeting(
     )
 
 
-    # ==========================================
+    # ========================================================
     # Request Headers
-    # ==========================================
+    # ========================================================
 
     headers = {
 
@@ -163,12 +203,9 @@ def create_teams_meeting(
     }
 
 
-    # ==========================================
-    # Microsoft Graph Calendar Event API
-    # ==========================================
-    # A calendar-backed Teams meeting is used so that
-    # the meeting can later be associated with a
-    # transcript through Microsoft Graph.
+    # ========================================================
+    # Microsoft Graph Calendar Event URL
+    # ========================================================
 
     teams_meeting_url = (
         "https://graph.microsoft.com/v1.0/"
@@ -176,10 +213,9 @@ def create_teams_meeting(
     )
 
 
-
-    # ==========================================
+    # ========================================================
     # Build Interviewer Attendees
-    # ==========================================
+    # ========================================================
 
     attendees = []
 
@@ -201,66 +237,102 @@ def create_teams_meeting(
         })
 
 
-    # ==========================================
+    # ========================================================
     # Calendar-backed Teams Meeting Payload
-    # ==========================================
-    # Creating the meeting as a calendar event with
-    # isOnlineMeeting=True allows the meeting to be
-    # associated with the organizer's calendar and
-    # later used for transcript retrieval.
+    # ========================================================
     #
-    # startDateTime / endDateTime are expected in the
-    # format:
-    #   2026-08-10T14:30:00
+    # IMPORTANT:
     #
-    # The timezone is explicitly specified below.
-    # ==========================================
+    # start.dateTime = local Indian time
+    #
+    # start.timeZone = India Standard Time
+    #
+    # end.dateTime = local Indian time
+    #
+    # end.timeZone = India Standard Time
+    #
+    # This prevents Microsoft Graph from interpreting
+    # 14:30 as UTC or another timezone.
+    #
+    # ========================================================
 
-    teams_meeting_payload = calendar_events_url_payload = {
+    teams_meeting_payload = {
 
-    "subject": f"{subject}",
+        "subject": subject,
 
-    "body": {
+        "body": {
 
-        "contentType": "HTML",
+            "contentType": "HTML",
 
-        "content": (
-            "<html><body>"
-            "<p>Interview meeting created by HR Recruitment Team.</p>"
-            "</body></html>"
-        )
-    },
+            "content": (
+                "<html><body>"
+                "<p>"
+                "Interview meeting created by "
+                "HR Recruitment Team."
+                "</p>"
+                "</body></html>"
+            )
+        },
 
-    "location": {
+        "start": {
 
-        "displayName": "Microsoft Teams"
-    },
+            "dateTime": graph_start_datetime,
 
-    "attendees": attendees,
+            "timeZone": "India Standard Time"
+        },
 
-    "isOnlineMeeting": True,
+        "end": {
 
-    "onlineMeetingProvider": "teamsForBusiness",
+            "dateTime": graph_end_datetime,
 
-    "responseRequested": True,
+            "timeZone": "India Standard Time"
+        },
 
-    "allowNewTimeProposals": True,
+        "location": {
 
-    "isReminderOn": True,
+            "displayName": "Microsoft Teams"
+        },
 
-    "reminderMinutesBeforeStart": 30,
+        "attendees": attendees,
 
-    "showAs": "busy",
+        "isOnlineMeeting": True,
 
-    "importance": "normal",
+        "onlineMeetingProvider": "teamsForBusiness",
 
-    "sensitivity": "normal"
-}
+        "responseRequested": True,
+
+        "allowNewTimeProposals": True,
+
+        "isReminderOn": True,
+
+        "reminderMinutesBeforeStart": 30,
+
+        "showAs": "busy",
+
+        "importance": "normal",
+
+        "sensitivity": "normal"
+    }
 
 
-    # ==========================================
-    # Create Meeting
-    # ==========================================
+    # ========================================================
+    # Print Payload for Debugging
+    # ========================================================
+
+    print("")
+    print("===============================================")
+    print("TEAMS MEETING PAYLOAD")
+    print("===============================================")
+
+    print(teams_meeting_payload)
+
+    print("===============================================")
+    print("")
+
+
+    # ========================================================
+    # Create Calendar Event / Teams Meeting
+    # ========================================================
 
     response = requests.post(
 
@@ -272,9 +344,9 @@ def create_teams_meeting(
     )
 
 
-    # ==========================================
+    # ========================================================
     # Read Microsoft Graph Response
-    # ==========================================
+    # ========================================================
 
     try:
 
@@ -285,524 +357,1005 @@ def create_teams_meeting(
         return {
 
             "status": "Failed",
+
+            "statusCode": response.status_code,
 
             "message": response.text
         }
 
 
-    # ==========================================
+    # ========================================================
+    # Check Meeting Creation
+    # ========================================================
+
+    if response.status_code != 201:
+
+        print("")
+        print("===============================================")
+        print("MICROSOFT GRAPH ERROR")
+        print("===============================================")
+        print(response_data)
+        print("===============================================")
+        print("")
+
+        return {
+
+            "status": "Failed",
+
+            "statusCode": response.status_code,
+
+            "response": response_data
+        }
+
+
+    # ========================================================
     # Meeting Created Successfully
-    # ==========================================
+    # ========================================================
 
-    if response.status_code == 201:
-
-        # --------------------------------------
-        # Calculate Duration
-        # --------------------------------------
-
-        start = datetime.fromisoformat(
-            startDateTime.replace(
-                "Z",
-                "+00:00"
-            )
-        )
-
-        end = datetime.fromisoformat(
-            endDateTime.replace(
-                "Z",
-                "+00:00"
-            )
-        )
-
-        duration = end - start
+    print("")
+    print("===============================================")
+    print("TEAMS MEETING CREATED")
+    print("===============================================")
 
 
-        # --------------------------------------
-        # Get Calendar Event ID
-        # --------------------------------------
+    # ========================================================
+    # Calculate Duration
+    # ========================================================
 
-        event_id = response_data.get(
-            "id"
-        )
+    start = datetime.fromisoformat(
+        graph_start_datetime
+    )
+
+    end = datetime.fromisoformat(
+        graph_end_datetime
+    )
+
+    duration = end - start
 
 
-        # --------------------------------------
-        # Get Teams Meeting URL
-        # --------------------------------------
+    # ========================================================
+    # Get Calendar Event ID
+    # ========================================================
 
-        online_meeting = (
-            response_data.get(
-                "onlineMeeting",
-                {}
-            )
-        )
+    event_id = response_data.get(
+        "id"
+    )
 
-        join_web_url = online_meeting.get(
-            "joinUrl"
-        )
 
-        # ==========================================
-    # Candidate Mail
-    # ==========================================
+    # ========================================================
+    # Get Teams Online Meeting
+    # ========================================================
+
+    online_meeting = response_data.get(
+        "onlineMeeting",
+        {}
+    )
+
+    join_web_url = online_meeting.get(
+        "joinUrl"
+    )
+
+    online_meeting_id = online_meeting.get(
+        "id"
+    )
+
+
+    # ========================================================
+    # Debug Meeting Information
+    # ========================================================
+
+    print("Event ID:")
+    print(event_id)
+
+    print("Teams Join URL:")
+    print(join_web_url)
+
+    print("Online Meeting ID:")
+    print(online_meeting_id)
+
+    print("Start:")
+    print(graph_start_datetime)
+
+    print("End:")
+    print(graph_end_datetime)
+
+    print("Duration:")
+    print(duration)
+
+    print("===============================================")
+    print("")
+
+
+    # ========================================================
+    # Candidate Email
+    # ========================================================
 
     candidate_body = f"""
-    <html>
-    <body>
+<html>
+<body>
 
-    <p>Dear {candidateName},</p>
+<p>Dear {candidateName},</p>
 
-    <p>
-    We are pleased to inform you that your interview
-    has been scheduled.
-    </p>
+<p>
+We are pleased to inform you that your interview
+has been scheduled.
+</p>
 
-    <p>
-    <strong>Interview Subject:</strong> {subject}<br>
-    <strong>Interview Date:</strong> {interview_date}<br>
-    <strong>Interview Time:</strong> {interview_time}
-    </p>
+<p>
 
-    <p>
-    <a href="{join_web_url}">
-    Join Microsoft Teams Meeting
-    </a>
-    </p>
+<strong>Interview Subject:</strong>
+{subject}
+<br>
 
-    <p>
-    Please join the meeting at the scheduled time.
-    </p>
+<strong>Interview Date:</strong>
+{interview_date}
+<br>
 
-    <p>
-    Regards,<br>
-    HR Recruitment Team
-    </p>
+<strong>Interview Time:</strong>
+{interview_time}
 
-    </body>
-    </html>
-    """
+</p>
 
-    send_mail(
+<p>
+
+<a href="{join_web_url}">
+Join Microsoft Teams Meeting
+</a>
+
+</p>
+
+<p>
+Please join the meeting at the scheduled time.
+</p>
+
+<p>
+
+Regards,
+<br>
+HR Recruitment Team
+
+</p>
+
+</body>
+</html>
+"""
+
+
+    # ========================================================
+    # Send Candidate Email
+    # ========================================================
+
+    candidate_mail_status = send_mail(
+
         access_token,
+
         email,
+
         f"{subject} - {candidateName}",
+
         candidate_body
     )
 
-    # ==========================================
-    # Interviewer Mails
-    # ==========================================
+
+    # ========================================================
+    # Interviewer Emails
+    # ========================================================
+
+    interviewer_mail_status = []
+
 
     for interviewer_name, interviewer_email in zip(
+
         interviewers,
+
         interviewersEmail
+
     ):
 
         interviewer_body = f"""
-        <html>
-        <body>
+<html>
+<body>
 
-        <p>Dear {interviewer_name},</p>
+<p>Dear {interviewer_name},</p>
 
-        <p>
-        You have been assigned to conduct an interview
-        for the following candidate.
-        </p>
+<p>
+You have been assigned to conduct an interview
+for the following candidate.
+</p>
 
-        <p>
-        <strong>Candidate Name:</strong> {candidateName}<br>
-        <strong>Interview Subject:</strong> {subject}<br>
-        <strong>Interview Date:</strong> {interview_date}<br>
-        <strong>Interview Time:</strong> {interview_time}
-        </p>
+<p>
 
-        <p>
-        <a href="{join_web_url}">
-        Join Microsoft Teams Meeting
-        </a>
-        </p>
+<strong>Candidate Name:</strong>
+{candidateName}
+<br>
 
-        <p>
-        Please join the meeting at the scheduled time
-        and conduct the interview with the candidate.
-        </p>
+<strong>Interview Subject:</strong>
+{subject}
+<br>
 
-        <p>
-        Regards,<br>
-        HR Recruitment Team
-        </p>
+<strong>Interview Date:</strong>
+{interview_date}
+<br>
 
-        </body>
-        </html>
-        """
+<strong>Interview Time:</strong>
+{interview_time}
 
-        send_mail(
+</p>
+
+<p>
+
+<a href="{join_web_url}">
+Join Microsoft Teams Meeting
+</a>
+
+</p>
+
+<p>
+Please join the meeting at the scheduled time
+and conduct the interview with the candidate.
+</p>
+
+<p>
+
+Regards,
+<br>
+HR Recruitment Team
+
+</p>
+
+</body>
+</html>
+"""
+
+
+        mail_status = send_mail(
+
             access_token,
+
             interviewer_email,
+
             f"Interview Assignment - {candidateName}",
+
             interviewer_body
         )
 
 
-        # --------------------------------------
-        # Return the calendar event ID.
-        #
-        # The event ID is important for tracking the
-        # scheduled interview in your application.
-        #
-        # The onlineMeeting object contains the Teams
-        # join URL.
-        # --------------------------------------
+        interviewer_mail_status.append({
+
+            "interviewer": interviewer_name,
+
+            "email": interviewer_email,
+
+            "statusCode": mail_status
+        })
 
 
-        # --------------------------------------
-        # Return Response
-        # --------------------------------------
-
-        return {
-
-            "status": "Success",
-
-            "candidateName": candidateName,
-
-            "candidateEmail": email,
-
-            "interviewers": interviewers,
-
-            "interviewersEmail": interviewersEmail,
-
-            "eventId": event_id,
-
-            "joinWebUrl": join_web_url,
-
-            "onlineMeetingId": online_meeting.get(
-                "id"
-            ),
-
-            "startDateTime": startDateTime,
-
-            "endDateTime": endDateTime,
-
-            "subject": response_data.get(
-                "subject"
-            ),
-
-            "duration": str(duration)
-        }
-
-
-    # ==========================================
-    # Microsoft Graph Error
-    # ==========================================
+    # ========================================================
+    # Final Response
+    #
+    # IMPORTANT:
+    #
+    # This return is OUTSIDE the interviewer loop.
+    #
+    # Therefore all interviewers get their emails.
+    # ========================================================
 
     return {
 
-        "status": "Failed",
+        "status": "Success",
 
-        "statusCode": response.status_code,
+        "candidateName": candidateName,
 
-        "response": response_data
+        "candidateEmail": email,
+
+        "interviewers": interviewers,
+
+        "interviewersEmail": interviewersEmail,
+
+        "eventId": event_id,
+
+        "joinWebUrl": join_web_url,
+
+        "onlineMeetingId": online_meeting_id,
+
+        "startDateTime": graph_start_datetime,
+
+        "endDateTime": graph_end_datetime,
+
+        "timeZone": "India Standard Time",
+
+        "subject": response_data.get(
+            "subject"
+        ),
+
+        "duration": str(duration),
+
+        "candidateMailStatus": candidate_mail_status,
+
+        "interviewerMailStatus": interviewer_mail_status
     }
 
 
-# ==========================================
+# ============================================================
 # Get Online Meeting from Calendar Event
-# ==========================================
+# ============================================================
+
 def get_online_meeting_from_event(
     access_token,
     event_id
 ):
-    """
-    Resolve a calendar event to its Teams onlineMeetingId.
 
-    Flow:
-        Event ID -> calendar event -> joinUrl
-        -> JoinWebUrl lookup -> onlineMeetingId
     """
+    Flow:
+
+        Event ID
+            ↓
+        Calendar Event
+            ↓
+        onlineMeeting.joinUrl
+            ↓
+        Search onlineMeetings
+            ↓
+        onlineMeetingId
+    """
+
+
+    # ========================================================
+    # Get Calendar Event
+    # ========================================================
 
     event_url = (
+
         "https://graph.microsoft.com/v1.0/"
+
         f"users/{OBJECT_ID}/events/{event_id}"
+
     )
 
+
     headers = {
-        "Authorization": f"Bearer {access_token}"
+
+        "Authorization": (
+            f"Bearer {access_token}"
+        )
     }
+
 
     params = {
-        "$select": "id,subject,onlineMeeting"
+
+        "$select": (
+            "id,"
+            "subject,"
+            "onlineMeeting,"
+            "start,"
+            "end"
+        )
     }
 
+
     response = requests.get(
+
         event_url,
+
         headers=headers,
+
         params=params
     )
 
+
+    # ========================================================
+    # Parse Response
+    # ========================================================
+
     try:
+
         response_data = response.json()
+
     except Exception:
-        response_data = {"message": response.text}
+
+        response_data = {
+
+            "message": response.text
+        }
+
+
+    # ========================================================
+    # Check Response
+    # ========================================================
 
     if response.status_code != 200:
+
         return {
+
             "status": "Failed",
+
             "statusCode": response.status_code,
+
             "response": response_data
         }
 
-    online_meeting = response_data.get("onlineMeeting", {})
-    join_url = online_meeting.get("joinUrl")
+
+    # ========================================================
+    # Get Online Meeting
+    # ========================================================
+
+    online_meeting = response_data.get(
+
+        "onlineMeeting",
+
+        {}
+    )
+
+
+    join_url = online_meeting.get(
+
+        "joinUrl"
+    )
+
+
+    # ========================================================
+    # No Join URL
+    # ========================================================
 
     if not join_url:
+
         return {
+
             "status": "Failed",
+
             "message": (
                 "The calendar event does not contain "
                 "a Teams online meeting join URL."
             ),
+
             "eventId": event_id
         }
 
+
+    # ========================================================
+    # Get Online Meeting ID
+    # ========================================================
+
     meetings_url = (
+
         "https://graph.microsoft.com/v1.0/"
+
         f"users/{OBJECT_ID}/onlineMeetings"
+
     )
 
+
     meeting_params = {
-        "$filter": f"JoinWebUrl eq '{join_url}'"
+
+        "$filter": (
+            f"JoinWebUrl eq '{join_url}'"
+        )
     }
 
+
     meeting_response = requests.get(
+
         meetings_url,
+
         headers=headers,
+
         params=meeting_params
     )
 
+
+    # ========================================================
+    # Parse Meeting Response
+    # ========================================================
+
     try:
+
         meeting_data = meeting_response.json()
+
     except Exception:
-        meeting_data = {"message": meeting_response.text}
+
+        meeting_data = {
+
+            "message": meeting_response.text
+        }
+
+
+    # ========================================================
+    # Check Meeting Response
+    # ========================================================
 
     if meeting_response.status_code != 200:
+
         return {
+
             "status": "Failed",
+
             "statusCode": meeting_response.status_code,
+
             "response": meeting_data
         }
 
-    meetings = meeting_data.get("value", [])
+
+    meetings = meeting_data.get(
+
+        "value",
+
+        []
+    )
+
+
+    # ========================================================
+    # Meeting Not Found
+    # ========================================================
 
     if not meetings:
+
         return {
+
             "status": "Failed",
+
             "message": (
-                "No Teams online meeting was found for "
-                "the calendar event join URL."
+                "No Teams online meeting was found "
+                "for the calendar event join URL."
             ),
+
             "eventId": event_id,
+
             "joinWebUrl": join_url
         }
 
+
+    # ========================================================
+    # Get First Meeting
+    # ========================================================
+
     meeting = meetings[0]
 
+
+    # ========================================================
+    # Return Meeting Information
+    # ========================================================
+
     return {
+
         "status": "Success",
+
         "eventId": event_id,
-        "onlineMeetingId": meeting.get("id"),
+
+        "onlineMeetingId": meeting.get(
+            "id"
+        ),
+
         "joinWebUrl": join_url,
-        "subject": meeting.get("subject")
+
+        "subject": meeting.get(
+            "subject"
+        )
     }
 
 
-# ==========================================
-# Get Transcripts for a Scheduled Meeting
-# ==========================================
+# ============================================================
+# Get Transcripts
+# ============================================================
+
 def get_transcripts(
+
     access_token,
+
     online_meeting_id
+
 ):
-    """Return transcript metadata for a Teams meeting."""
+
+    """
+    Return transcript metadata
+    for a Teams meeting.
+    """
+
 
     transcripts_url = (
+
         "https://graph.microsoft.com/v1.0/"
+
         f"users/{OBJECT_ID}/onlineMeetings/"
+
         f"{online_meeting_id}/transcripts"
+
     )
 
+
     headers = {
-        "Authorization": f"Bearer {access_token}"
+
+        "Authorization": (
+            f"Bearer {access_token}"
+        )
     }
 
+
     response = requests.get(
+
         transcripts_url,
+
         headers=headers
     )
 
+
+    # ========================================================
+    # Parse Response
+    # ========================================================
+
     try:
+
         response_data = response.json()
+
     except Exception:
-        response_data = {"message": response.text}
+
+        response_data = {
+
+            "message": response.text
+        }
+
+
+    # ========================================================
+    # Check Response
+    # ========================================================
 
     if response.status_code != 200:
+
         return {
+
             "status": "Failed",
+
             "statusCode": response.status_code,
+
             "response": response_data
         }
 
+
+    # ========================================================
+    # Return Transcript Metadata
+    # ========================================================
+
     return {
+
         "status": "Success",
-        "transcripts": response_data.get("value", [])
+
+        "transcripts": response_data.get(
+            "value",
+            []
+        )
     }
 
 
-# ==========================================
+# ============================================================
 # Get Actual Transcript Content
-# ==========================================
+# ============================================================
+
 def get_transcript_content(
+
     access_token,
+
     online_meeting_id,
+
     transcript_id
+
 ):
-    """Retrieve actual transcript content in VTT format."""
+
+    """
+    Retrieve actual transcript content
+    in VTT format.
+    """
+
 
     transcript_url = (
+
         "https://graph.microsoft.com/v1.0/"
+
         f"users/{OBJECT_ID}/onlineMeetings/"
+
         f"{online_meeting_id}/transcripts/"
+
         f"{transcript_id}/content"
+
     )
 
+
     headers = {
-        "Authorization": f"Bearer {access_token}",
+
+        "Authorization": (
+            f"Bearer {access_token}"
+        ),
+
         "Accept": "text/vtt"
     }
 
+
     response = requests.get(
+
         transcript_url,
+
         headers=headers
     )
 
+
+    # ========================================================
+    # Check Response
+    # ========================================================
+
     if response.status_code != 200:
+
         try:
+
             response_data = response.json()
+
         except Exception:
-            response_data = {"message": response.text}
+
+            response_data = {
+
+                "message": response.text
+            }
+
 
         return {
+
             "status": "Failed",
+
             "statusCode": response.status_code,
+
             "response": response_data
         }
 
+
+    # ========================================================
+    # Return Transcript
+    # ========================================================
+
     return {
+
         "status": "Success",
+
         "transcriptId": transcript_id,
+
         "onlineMeetingId": online_meeting_id,
+
         "content": response.text
     }
 
 
-# ==========================================
+# ============================================================
 # Get Latest Available Transcript by Event ID
-# ==========================================
+# ============================================================
+
 def get_latest_transcript(
+
     event_id
+
 ):
+
     """
     End-to-end flow:
-        Event ID
-        -> joinUrl
-        -> onlineMeetingId
-        -> list transcripts
-        -> latest transcript
-        -> transcript content
 
-    If no transcript is available, return NotAvailable.
+        Event ID
+            ↓
+        Calendar Event
+            ↓
+        Join URL
+            ↓
+        Online Meeting ID
+            ↓
+        List Transcripts
+            ↓
+        Latest Transcript
+            ↓
+        Transcript Content
+
+    If no transcript is available,
+    return NotAvailable.
     """
+
+
+    # ========================================================
+    # Generate Access Token
+    # ========================================================
 
     access_token = get_access_token()
 
+
     if access_token is None:
+
         return {
+
             "status": "Failed",
-            "message": "Unable to generate access token."
+
+            "message": (
+                "Unable to generate access token."
+            )
         }
 
-    # Step 1: Event ID -> onlineMeetingId
+
+    # ========================================================
+    # Step 1
+    #
+    # Event ID -> Online Meeting ID
+    # ========================================================
+
     meeting_result = get_online_meeting_from_event(
+
         access_token,
+
         event_id
     )
 
-    if meeting_result.get("status") != "Success":
+
+    if meeting_result.get(
+        "status"
+    ) != "Success":
+
         return meeting_result
 
-    online_meeting_id = meeting_result.get("onlineMeetingId")
+
+    online_meeting_id = meeting_result.get(
+
+        "onlineMeetingId"
+    )
+
+
+    # ========================================================
+    # Check Online Meeting ID
+    # ========================================================
 
     if not online_meeting_id:
+
         return {
+
             "status": "Failed",
+
             "message": (
-                "No Meeting started for the calendar event."
+                "No Teams online meeting was found "
+                "for the calendar event."
             ),
+
             "eventId": event_id
         }
 
-    # Step 2: Get transcript metadata
+
+    # ========================================================
+    # Step 2
+    #
+    # Get Transcript Metadata
+    # ========================================================
+
     transcript_result = get_transcripts(
+
         access_token,
+
         online_meeting_id
     )
 
-    if transcript_result.get("status") != "Success":
+
+    if transcript_result.get(
+        "status"
+    ) != "Success":
+
         return transcript_result
 
-    transcripts = transcript_result.get("transcripts", [])
+
+    transcripts = transcript_result.get(
+
+        "transcripts",
+
+        []
+    )
+
+
+    # ========================================================
+    # No Transcript
+    # ========================================================
 
     if not transcripts:
+
         return {
+
             "status": "NotAvailable",
-            "message": "No transcription available.",
+
+            "message": (
+                "No transcription available."
+            ),
+
             "eventId": event_id,
+
             "onlineMeetingId": online_meeting_id
         }
 
-    # Step 3: Select newest transcript
+
+    # ========================================================
+    # Step 3
+    #
+    # Select Newest Transcript
+    # ========================================================
+
     transcripts.sort(
-        key=lambda item: item.get("createdDateTime", ""),
+
+        key=lambda item:
+        item.get(
+            "createdDateTime",
+            ""
+        ),
+
         reverse=True
     )
 
+
     latest = transcripts[0]
-    transcript_id = latest.get("id")
+
+
+    transcript_id = latest.get(
+
+        "id"
+    )
+
+
+    # ========================================================
+    # Check Transcript ID
+    # ========================================================
 
     if not transcript_id:
+
         return {
+
             "status": "Failed",
+
             "message": (
                 "A transcript was found, but its ID "
                 "was not returned by Microsoft Graph."
             ),
+
             "eventId": event_id,
+
             "onlineMeetingId": online_meeting_id
         }
 
-    # Step 4: Get transcript content
+
+    # ========================================================
+    # Step 4
+    #
+    # Get Actual Transcript Content
+    # ========================================================
+
     content_result = get_transcript_content(
+
         access_token,
+
         online_meeting_id,
+
         transcript_id
     )
 
-    if content_result.get("status") != "Success":
+
+    if content_result.get(
+        "status"
+    ) != "Success":
+
         return content_result
 
+
+    # ========================================================
+    # Final Transcript Response
+    # ========================================================
+
     return {
+
         "status": "Success",
+
         "eventId": event_id,
+
         "onlineMeetingId": online_meeting_id,
+
         "transcriptId": transcript_id,
-        "createdDateTime": latest.get("createdDateTime"),
-        "transcript": content_result.get("content")
+
+        "createdDateTime": latest.get(
+            "createdDateTime"
+        ),
+
+        "transcript": content_result.get(
+            "content"
+        )
     }
