@@ -1,10 +1,10 @@
-
 from msal import ConfidentialClientApplication
 import requests
 import os
 
 from dotenv import load_dotenv
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 load_dotenv()
@@ -74,9 +74,7 @@ def send_mail(
     }
 
     payload = {
-
         "message": {
-
             "subject": subject,
 
             "body": {
@@ -96,6 +94,12 @@ def send_mail(
         "saveToSentItems": True
     }
 
+    print("===============================================")
+    print("Sending Email")
+    print(f"Recipient: {recipient_email}")
+    print(f"Subject: {subject}")
+    print("===============================================")
+
     response = requests.post(
         url,
         headers=headers,
@@ -104,14 +108,246 @@ def send_mail(
 
     print(f"sendmail - {response.status_code}")
     print("-----------------------------------------------")
-    print(url)
 
     if response.status_code not in [200, 202]:
 
         print("Email sending failed.")
         print(response.text)
 
-    return response.status_code
+        return {
+            "status": "Failed",
+            "recipient": recipient_email,
+            "status_code": response.status_code,
+            "error": response.text
+        }
+
+    print("Email sent successfully.")
+
+    return {
+        "status": "Success",
+        "recipient": recipient_email,
+        "status_code": response.status_code
+    }
+
+# ============================================================
+# Validate Interview Date & Time
+# ============================================================
+
+def validate_interview_time(
+    startDateTime,
+    endDateTime
+):
+
+    """
+    Validate the requested interview time.
+
+    Incoming time is treated as IST.
+
+    Example:
+
+        2026-09-11T14:30:00
+
+    means:
+
+        11 September 2026
+        2:30 PM IST
+    """
+
+    try:
+
+        # ----------------------------------------------------
+        # India timezone
+        # ----------------------------------------------------
+
+        india_timezone = ZoneInfo(
+            "Asia/Kolkata"
+        )
+
+
+        # ----------------------------------------------------
+        # Remove Z if it is present
+        #
+        # IMPORTANT:
+        #
+        # Your application currently treats the supplied
+        # datetime as IST.
+        #
+        # Therefore:
+        #
+        # 2026-09-11T14:30:00Z
+        #
+        # is treated as:
+        #
+        # 2026-09-11T14:30:00 IST
+        #
+        # ----------------------------------------------------
+
+        clean_start = startDateTime.replace(
+            "Z",
+            ""
+        )
+
+        clean_end = endDateTime.replace(
+            "Z",
+            ""
+        )
+
+
+        # ----------------------------------------------------
+        # Convert strings to datetime objects
+        # ----------------------------------------------------
+
+        start_time = datetime.fromisoformat(
+            clean_start
+        )
+
+        end_time = datetime.fromisoformat(
+            clean_end
+        )
+
+
+        # ----------------------------------------------------
+        # Attach IST timezone
+        # ----------------------------------------------------
+
+        if start_time.tzinfo is None:
+
+            start_time = start_time.replace(
+                tzinfo=india_timezone
+            )
+
+
+        if end_time.tzinfo is None:
+
+            end_time = end_time.replace(
+                tzinfo=india_timezone
+            )
+
+
+        # ----------------------------------------------------
+        # Get current IST time
+        # ----------------------------------------------------
+
+        current_time = datetime.now(
+            india_timezone
+        )
+
+
+        # ----------------------------------------------------
+        # Print time information
+        # ----------------------------------------------------
+
+        print("")
+        print("===============================================")
+        print("INTERVIEW TIME VALIDATION")
+        print("===============================================")
+
+        print(
+            "Current IST time:"
+        )
+
+        print(
+            current_time.strftime(
+                "%Y-%m-%d %H:%M:%S %Z"
+            )
+        )
+
+        print(
+            "Requested start time:"
+        )
+
+        print(
+            start_time.strftime(
+                "%Y-%m-%d %H:%M:%S %Z"
+            )
+        )
+
+        print(
+            "Requested end time:"
+        )
+
+        print(
+            end_time.strftime(
+                "%Y-%m-%d %H:%M:%S %Z"
+            )
+        )
+
+        print("===============================================")
+        print("")
+
+
+        # ----------------------------------------------------
+        # Validate end time
+        # ----------------------------------------------------
+
+        if end_time <= start_time:
+
+            return {
+
+                "valid": False,
+
+                "message": (
+                    "The interview end time must be "
+                    "after the start time."
+                )
+            }
+
+
+        # ----------------------------------------------------
+        # Validate requested start time
+        #
+        # If requested start time is already past,
+        # don't create the Teams meeting.
+        # ----------------------------------------------------
+
+        if start_time <= current_time:
+
+            return {
+
+                "valid": False,
+
+                "message": (
+                    "The selected interview time is in "
+                    "the past. Please provide a future "
+                    "interview time."
+                )
+            }
+
+
+        # ----------------------------------------------------
+        # Interview time is valid
+        # ----------------------------------------------------
+
+        return {
+
+            "valid": True,
+
+            "message": (
+                "Interview time is valid."
+            ),
+
+            "currentTime": current_time.isoformat(),
+
+            "startTime": start_time.isoformat(),
+
+            "endTime": end_time.isoformat()
+        }
+
+
+    except ValueError as e:
+
+        return {
+
+            "valid": False,
+
+            "message": (
+                "Invalid date/time format. "
+                "Expected format: "
+                "YYYY-MM-DDTHH:MM:SS"
+            ),
+
+            "error": str(e)
+        }
 
 
 # ============================================================
@@ -127,6 +363,55 @@ def create_teams_meeting(
     interviewers,
     interviewersEmail
 ):
+
+    # ========================================================
+    # Validate Interview Time FIRST
+    # ========================================================
+    #
+    # IMPORTANT:
+    #
+    # We perform this validation BEFORE:
+    #
+    # 1. Generating Graph token
+    # 2. Creating calendar event
+    # 3. Sending candidate email
+    # 4. Sending interviewer emails
+    #
+    # Therefore a past interview will NOT be scheduled.
+    #
+    # ========================================================
+
+    time_validation = validate_interview_time(
+        startDateTime,
+        endDateTime
+    )
+
+
+    if not time_validation.get(
+        "valid"
+    ):
+
+        return {
+
+            "status": "Failed",
+
+            "message": time_validation.get(
+                "message"
+            ),
+
+            "currentTime": time_validation.get(
+                "currentTime"
+            ),
+
+            "requestedStartTime": time_validation.get(
+                "startTime"
+            ),
+
+            "requestedEndTime": time_validation.get(
+                "endTime"
+            )
+        }
+
 
     # ========================================================
     # Generate Access Token
@@ -239,21 +524,6 @@ def create_teams_meeting(
 
     # ========================================================
     # Calendar-backed Teams Meeting Payload
-    # ========================================================
-    #
-    # IMPORTANT:
-    #
-    # start.dateTime = local Indian time
-    #
-    # start.timeZone = India Standard Time
-    #
-    # end.dateTime = local Indian time
-    #
-    # end.timeZone = India Standard Time
-    #
-    # This prevents Microsoft Graph from interpreting
-    # 14:30 as UTC or another timezone.
-    #
     # ========================================================
 
     teams_meeting_payload = {
@@ -632,12 +902,6 @@ HR Recruitment Team
 
     # ========================================================
     # Final Response
-    #
-    # IMPORTANT:
-    #
-    # This return is OUTSIDE the interviewer loop.
-    #
-    # Therefore all interviewers get their emails.
     # ========================================================
 
     return {
@@ -698,7 +962,6 @@ def get_online_meeting_from_event(
             ↓
         onlineMeetingId
     """
-
 
     # ========================================================
     # Get Calendar Event
@@ -950,7 +1213,6 @@ def get_transcripts(
     for a Teams meeting.
     """
 
-
     transcripts_url = (
 
         "https://graph.microsoft.com/v1.0/"
@@ -1019,7 +1281,9 @@ def get_transcripts(
         "status": "Success",
 
         "transcripts": response_data.get(
+
             "value",
+
             []
         )
     }
@@ -1044,7 +1308,6 @@ def get_transcript_content(
     in VTT format.
     """
 
-
     transcript_url = (
 
         "https://graph.microsoft.com/v1.0/"
@@ -1061,7 +1324,9 @@ def get_transcript_content(
     headers = {
 
         "Authorization": (
+
             f"Bearer {access_token}"
+
         ),
 
         "Accept": "text/vtt"
@@ -1151,7 +1416,6 @@ def get_latest_transcript(
     return NotAvailable.
     """
 
-
     # ========================================================
     # Generate Access Token
     # ========================================================
@@ -1186,7 +1450,9 @@ def get_latest_transcript(
 
 
     if meeting_result.get(
+
         "status"
+
     ) != "Success":
 
         return meeting_result
@@ -1232,7 +1498,9 @@ def get_latest_transcript(
 
 
     if transcript_result.get(
+
         "status"
+
     ) != "Success":
 
         return transcript_result
@@ -1275,9 +1543,13 @@ def get_latest_transcript(
     transcripts.sort(
 
         key=lambda item:
+
         item.get(
+
             "createdDateTime",
+
             ""
+
         ),
 
         reverse=True
@@ -1331,7 +1603,9 @@ def get_latest_transcript(
 
 
     if content_result.get(
+
         "status"
+
     ) != "Success":
 
         return content_result
@@ -1352,10 +1626,14 @@ def get_latest_transcript(
         "transcriptId": transcript_id,
 
         "createdDateTime": latest.get(
+
             "createdDateTime"
+
         ),
 
         "transcript": content_result.get(
+
             "content"
+
         )
     }
