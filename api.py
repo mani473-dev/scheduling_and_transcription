@@ -1,12 +1,14 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 
-from main_seperate_mail import create_teams_meeting, get_latest_transcript
+from main_seperate_mail import (
+    create_teams_meeting,
+    get_latest_transcript
+)
 
 
 app = FastAPI()
-
 
 
 class TeamsMeetingRequest(BaseModel):
@@ -21,7 +23,6 @@ class TeamsMeetingRequest(BaseModel):
     interviewersEmail: List[str]
 
 
-
 @app.get("/")
 def home():
 
@@ -30,38 +31,61 @@ def home():
     }
 
 
-
 @app.post("/create-teams-meeting")
-def execute(request: TeamsMeetingRequest):
+def execute(
+    request: TeamsMeetingRequest
+):
 
-    return create_teams_meeting(
+    try:
 
-        request.candidateName,
+        return create_teams_meeting(
 
-        request.email,
+            request.candidateName,
 
-        request.startDateTime,
+            request.email,
 
-        request.endDateTime,
+            request.startDateTime,
 
-        request.subject,
+            request.endDateTime,
 
-        request.interviewers,
+            request.subject,
 
-        request.interviewersEmail
-    )
+            request.interviewers,
+
+            request.interviewersEmail
+        )
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
 
 # ==========================================
 # Get Latest Teams Meeting Transcript
 # ==========================================
+
 class TeamsTranscriptRequest(BaseModel):
 
     eventId: str
 
 
 @app.post("/get-transcript")
-def get_transcript(request: TeamsTranscriptRequest):
+def get_transcript(
+    request: TeamsTranscriptRequest
+):
 
-    return get_latest_transcript(
-        request.eventId
-    )
+    try:
+
+        return get_latest_transcript(
+            request.eventId
+        )
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
